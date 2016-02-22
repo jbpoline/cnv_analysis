@@ -11,12 +11,29 @@ import numpy as np
 
 def str2floats(value, sep=',', comma2point=False):
     """
-    takes a string with one or several p-values 
-    returns:
-    combined score dangerosite
+    takes a string (in this use case, the string contains one or several
+    p-values: 
+
+    parameters: 
+    ------------
+    value: string
+        the string 
+    returns: list
+        list of float
+
+    >>> str2floats('1,3 4,2, 5', sep=' ', comma2point=True) 
+    [1.3, 4.2, 5.0]
+    >>> str2floats('1.3, 4.2, 5')
+    [1.3, 4.2, 5.0]
     """
+
+    # somme strings have , for the . 
+    if comma2point and sep==',':
+        raise ValueError, print("comma2point {} and {} not compatible", 
+                    comma2point, sep)
     if comma2point:
         value = value.replace(',', '.')
+
     lst = value.split(sep)
     lst = [l.rstrip().lstrip() for l in lst if (l != '')]
     try:
@@ -39,21 +56,15 @@ def pH1_simple(alpha, pi=None, beta=None):
     return (1. - alpha)
 
 
-#-------------------
+#-------------------------------------
 defaultarg = {'pi':0.5, 'beta':0.8}
-#-------------------
+#-------------------------------------
 
 def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
     """
     take a series of pvalue (one line), return a dangerosity score
-    """
-    
-    pvalues = np.asarray(str2floats(pvalues))
-    
-    assert np.all( np.logical_and(pvalues <= 1., pvalues >=0)), \
-            [pvalues, np.logical_and((pvalues <= 1.), (pvalues >=0))]
-    
-    """ how to combine the p-values?  
+
+    How to combine the p-values?  
     I want a score that scales with the number of gene affected. Per gene, if the p is zero, 
     I want my score to be 1. and if the p value is close to 1, the score should be 0.
     To start with, I'm setting the score to be 1-p:
@@ -62,11 +73,36 @@ def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
 
     The problem with this approach: I would like something closer to the probability of 
     CNV to be dangerous, which requires an apriori on the probablility that the CNV is dangerous, 
-    and the power of the test (leading to the p value that we are using).
+    and the power of the test: 
     
         p(CNV dangerous) =  (1 - beta) * pi / ((1 - beta) * pi + alpha * (1 - pi))
-    
+        (see power notebook)
+        where:
+        beta    == power of the test,
+        pi      == apriori probability that the cnv is dangerous
+        alpha   == risk of false positive
+
+
+    parameters:
+    -----------
+    pvalue: list
+        list of p values, one per gene,
+    pval2score: callable
+        one of (pH1_simple, pH1_with_apriori), default to pH1_simple
+        the function that takes a p value as input and spits out a score
+    argvals: dict
+        default arguments for pval2score function
+        default: defaultarg = {'pi':0.5, 'beta':0.8}
     """
+   
+    # 
+    pvalues = np.asarray(str2floats(pvalues))
+   
+    # check these values are in [0..1]
+    assert np.all( np.logical_and(pvalues <= 1., pvalues >=0)), \
+            [pvalues, np.logical_and((pvalues <= 1.), (pvalues >=0))]
+    
+    # sum transform each p value to score and sum
     res = np.asarray([pval2score(p, **argvals) for p in pvalues]).sum()
     return res
 
@@ -89,13 +125,13 @@ def test_danger_score(tests, verbose=True):
             if abs(dger - result) < np.finfo('float').eps:
                 pass
             else:
-                if verbose: print(test, " is failing", dger, results[idx])
+                if verbose: print(test, " is failing", dger, result[idx])
                 status = False
         except:
             if result == "Failed":
                 pass
             else:
-                if verbose: print(test, " is failing", results[idx])
+                if verbose: print(test, " is failing", result[idx])
                 status = False
                 
     return(status)
@@ -123,3 +159,150 @@ def _test_danger_score():
 
     assert test_danger_score(tests, verbose=False)
     return True
+
+
+
+
+
+#===============================================================================
+# functions to go from a cnv score to a probability of this cnv to be real
+#===============================================================================
+
+from scipy.interpolate import UnivariateSpline as spl
+from collections import OrderedDict
+
+
+def _build_dict_prob_cnv():
+    """
+    construct the dictionary used to build the 
+    function that will take a cnv score and spits out 
+    a proba of being true cnv
+
+    
+    """
+    # Values come from Guillaumes H. 
+
+    prob_cnv_vrai_str = \
+                    "15	20	80	25\n" + \
+                    "17,5	24	76	25\n" + \
+                    "20	36	64	25\n" + \
+                    "22,5	44	56	25\n" + \
+                    "25	83	17	60\n" + \
+                    "27,5	77	23	44\n" + \
+                    "30	95	5	60"
+
+    p_cnv = OrderedDict()
+    for line in prob_cnv_vrai_str.splitlines():
+        line = line.split('\t')
+        #print(line)
+        # only consider the index 0 and 1 values of line:
+        p_cnv[float(line[0].replace(',','.'))] = float(line[1])/100.
+    
+    return p_cnv
+
+
+def aff(bi, bs, vbi, vbs, x0, y0):
+    """
+    returns the affine function
+    """
+    a = (vbs - vbi)/(bs - bi)
+    b = y0  - a*x0
+    
+    def this_aff(x):
+        return a*x + b
+    
+    return this_aff
+
+def create_score2prob_lin_piecewise(p_cnv):
+
+    # create a dict that has the affine function
+    pf_cnv = OrderedDict({})
+    kcnv = p_cnv.keys()
+
+    for idx,k in enumerate(kcnv[:-1]):
+        k1 = kcnv[idx+1]
+        pf_cnv[k] = aff(k, k1, p_cnv[k], p_cnv[k1], k, p_cnv[k])
+    
+    # testing just this 
+    def test_pf_cnv():
+        assert pf_cnv[15](15) == .20
+        assert abs(pf_cnv[15](17.5) - pf_cnv[17.5](17.5)) < np.finfo(float).eps
+        assert abs(pf_cnv[17.5](20) - pf_cnv[20.](20.)) < np.finfo(float).eps
+        assert abs(pf_cnv[20.](22.5) - pf_cnv[22.5](22.5)) < np.finfo(float).eps
+        #assert pf_cnv[30](45) == 1.
+        return True
+    test_pf_cnv()
+    
+    # function linear piecewise:
+    def sc2prob(sc):
+        """
+        returns the proba that cnv with score sc is a cnv; 
+        """
+        # 
+        assert sc >= 15.
+        kcnv = pf_cnv.keys()
+        
+        # if greater than the last key, returns 1.0
+        if sc >= kcnv[-1]:
+            return 1.0
+        
+        idx = 0
+        while sc > kcnv[idx+1]: idx += 1
+        
+        return pf_cnv[kcnv[idx]](sc)
+    
+    return sc2prob
+    
+
+
+
+def create_score2prob_lin(p_cnv):
+    """
+    create the function that will transform a cnv score in a p-value 
+    of being a cnv
+
+    Just a linear approximation
+    """
+
+
+    kpcnv = p_cnv.keys()
+    lin_funct = spl(kpcnv, p_cnv.values(), k=1)
+    #x = np.arange(0,50,1)
+    #plt.plot(x, lin_funct(x), '-', p_cnv.keys(), p_cnv.values(), '+')
+
+    (x1, x2) = (kpcnv[0], kpcnv[-1])
+    a = (lin_funct(x2) - lin_funct(x1))/(x2 - x1)
+    b = lin_funct(x2) - a*x2
+    x_where_y_is_1 = (1. - b)/a
+    x_where_y_is_0 = (-b)/a
+
+    
+    def sc2prob(x):
+        if x < x_where_y_is_0:
+            return 0.
+        elif x < x_where_y_is_1:
+            return lin_funct(x)
+        else:
+            return 1.
+    
+    return sc2prob
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
