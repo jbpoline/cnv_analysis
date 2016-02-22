@@ -2,11 +2,12 @@ from __future__ import print_function
 from __future__ import division
 
 import numpy as np
+import six
+from datetime import datetime
 # import scipy.stats as sst
 # import matplotlib.pyplot as plt
 # import os
 # import os.path as osp
-# import six
 
 
 def str2floats(value, sep=',', comma2point=False):
@@ -170,7 +171,7 @@ def _test_danger_score():
 
 from scipy.interpolate import UnivariateSpline as spl
 from collections import OrderedDict
-
+import numbers
 
 def _build_dict_prob_cnv():
     """
@@ -278,20 +279,75 @@ def create_score2prob_lin(p_cnv):
 
     
     def sc2prob(x):
+        # x should not be a string
+        # assert not isinstance(x, six.string_types), "{} is str".format(x)
+        # but should be a number
+        assert isinstance(x, numbers.Real), \
+                                "{} is not a number: type {}".format(x,type(x))
+
         if x < x_where_y_is_0:
             return 0.
         elif x < x_where_y_is_1:
-            return lin_funct(x)
+            return float(lin_funct(x))
         else:
             return 1.
     
     return sc2prob
 
 
+def process_scores(scores):
+    """
+    scores: a list of strings 
 
+    return the cleaned scores : floats
+    """
 
+    # 1. comma to point, ' ' is separator
+    scores = np.asarray([str2floats(s, comma2point=True, sep=' ')[0] 
+                                                             for s in scores])
+    # 2. if the score is zero, put it to maximum value : 
+    # means the CNV has a maximum score
+    clean_score = scores
+    clean_score[scores==0] = scores.max()
 
+    return clean_score
 
+def process_one_score(score, max_score):
+
+    assert isinstance(score, six.string_types),\
+                        "{} is of type {}".format(score, type(score))
+
+    score = str2floats(score, comma2point=True, sep=' ')
+    assert len(score) == 1
+    score = score[0]
+    if score == 0:
+        score = max_score
+
+    return score
+        
+
+def make_uiid(tsv_arr, columns_names, first_line=None):
+    """
+    columns_names: list of column names with which the uiid are constructed
+    returns a list if given the full array, 
+    returns a string if given only one line (and the first line)
+    """
+    
+    chr2rm = ''.join([',', '.', ' ']) # others: ['!', '?', ...] ?
+    
+    if isinstance(tsv_arr, six.string_types) and (first_line != None):
+        # assume we are given one line of the tsv array
+        indexes = [first_line.split('\t').index(colname) for colname in columns_names]
+        uiid = '_'.join([(tsv_arr.split('\t')[ind]).translate(None,chr2rm) for ind in indexes])
+        
+    else: 
+        uiid = []
+        indexes = [tsv_arr[0].split('\t').index(colname) for colname in columns_names]
+        for line in tsv_arr[1:]:
+            ll = line.split('\t')
+            uiid.append('_'.join([ll[ind] for ind in indexes]))
+
+    return uiid
 
 
 
