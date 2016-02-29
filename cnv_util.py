@@ -3,14 +3,14 @@ from __future__ import division
 
 import numpy as np
 import six
-from datetime import datetime
+# from datetime import datetime
 # import scipy.stats as sst
 # import matplotlib.pyplot as plt
 # import os
 # import os.path as osp
 
 
-def str2floats(value, sep=',', comma2point=False):
+def str2floats(value, sep=',', comma2point=False, val_len=None):
     """
     takes a string (in this use case, the string contains one or several
     p-values: 
@@ -30,18 +30,82 @@ def str2floats(value, sep=',', comma2point=False):
 
     # somme strings have , for the . 
     if comma2point and sep==',':
-        raise ValueError, print("comma2point {} and {} not compatible", 
-                    comma2point, sep)
+        raise ValueError, "comma2point {} and sep :' {} ' not compatible".format(
+                                                            comma2point, sep)
     if comma2point:
         value = value.replace(',', '.')
 
     lst = value.split(sep)
     lst = [l.rstrip().lstrip() for l in lst if (l != '')]
+    if val_len is not None:
+        assert len(lst) == val_len, "val_len not ok: {}".format(lst)
+
     try:
         return [float(f) for f in lst]
     except:
-        print("value: ", value, "value.split(sep): ", lst)
+        print("cannot make a float of : ", value, "value.split(sep): ", lst)
         raise ValueError
+
+
+def get_one_col_val(i_col, line, comma2point=True, sep=' ', exclude=None, val_len=None):
+    """
+    extract the column index in line 
+    i_col: index of column
+    line: string
+    """
+
+    # assume col_split is \t
+    col_split = '\t'
+    # first line is the name of the columns
+    str_val = line.split(col_split)[i_col]
+    
+    if isinstance(exclude, six.string_types):
+        # something to exclude
+        if str_val == exclude:
+            return False
+
+    val = str2floats(str_val, sep=sep, comma2point=comma2point, val_len=val_len)[0] 
+    
+    return val
+
+
+def get_one_col_str(i_col, line):
+    """
+    extract the column index in line 
+    i_col: index of column
+    line: string
+    """
+    col_split = '\t'
+    return line.split(col_split)[i_col]
+    
+def get_col_vals(col_name, array, comma2point=True, sep=' ', exclude=None, val_len=None):
+    """
+    extract the column with name col_name in array
+    
+    """
+    # assume col_split is \t
+    col_split = '\t'
+    # first line is the name of the columns
+    line0 = array[0].split(col_split)
+    i_col = line0.index(col_name)
+    str_vals = np.asarray([line.split(col_split)[i_col] for line in array[1:]])
+    
+    if isinstance(exclude, six.string_types):
+        # something to exclude
+        to_keep = str_vals != exclude
+    else:
+        to_keep = np.full_like(str_vals, True, dtype=bool)
+    
+    print('to_keep.shape', to_keep.shape, 'number to keep: ', to_keep.sum()) 
+    
+    #  
+    vals = [str2floats(val, sep=sep, comma2point=comma2point, val_len=val_len)[0] \
+            for val in str_vals[to_keep]]
+    
+    assert len(vals) > 0, "nothing in this column : {}, empty result".format(vals)
+    
+    return np.asarray(vals)
+
 
 
 def pH1_with_apriori(alpha, pi=0.5, beta=.8):
@@ -61,7 +125,8 @@ def pH1_simple(alpha, pi=None, beta=None):
 defaultarg = {'pi':0.5, 'beta':0.8}
 #-------------------------------------
 
-def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
+def danger_score(pvalues, pval2score=pH1_simple, sep=' ', comma2point=True, 
+                                                            argvals=defaultarg):
     """
     take a series of pvalue (one line), return a dangerosity score
 
@@ -81,13 +146,14 @@ def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
         where:
         beta    == power of the test,
         pi      == apriori probability that the cnv is dangerous
-        alpha   == risk of false positive
+        alpha   == risk of false positive (the p-value given by the test)
 
 
     parameters:
     -----------
-    pvalue: list
-        list of p values, one per gene,
+    pvalue: string 
+        list of p values, one per gene, separated by space and with 
+        comma instead of point.
     pval2score: callable
         one of (pH1_simple, pH1_with_apriori), default to pH1_simple
         the function that takes a p value as input and spits out a score
@@ -97,7 +163,7 @@ def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
     """
    
     # 
-    pvalues = np.asarray(str2floats(pvalues))
+    pvalues = np.asarray(str2floats(pvalues, sep=sep, comma2point=comma2point))
    
     # check these values are in [0..1]
     assert np.all( np.logical_and(pvalues <= 1., pvalues >=0)), \
@@ -107,6 +173,14 @@ def danger_score(pvalues, pval2score=pH1_simple, argvals=defaultarg):
     res = np.asarray([pval2score(p, **argvals) for p in pvalues]).sum()
     return res
 
+
+def danger_score_fl(pvalues, pval2score=pH1_simple, argvals=defaultarg):
+    """
+    pvalues: one float
+
+    """
+    raise
+    
 
 def test_danger_score(tests, verbose=True):
     """
