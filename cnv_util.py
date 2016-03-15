@@ -13,13 +13,15 @@ import six
 def str2floats(value, sep=',', comma2point=False, val_len=None):
     """
     takes a string (in this use case, the string contains one or several
-    p-values: 
+    values (eg, p-values): 
 
     parameters: 
     ------------
     value: string
         the string 
-    returns: list
+    sep: cut the string with this separator 
+    returns:
+    -------
         list of float
 
     >>> str2floats('1,3 4,2, 5', sep=' ', comma2point=True) 
@@ -52,6 +54,10 @@ def get_one_col_val(i_col, line, comma2point=True, sep=' ', exclude=None, val_le
     extract the column index in line 
     i_col: index of column
     line: string
+    comma2point: bool
+        replace commas by points 
+    sep: string
+        within this column (string) split string with sep
     """
 
     # assume col_split is \t
@@ -82,6 +88,23 @@ def get_col_vals(col_name, array, comma2point=True, sep=' ', exclude=None, val_l
     """
     extract the column with name col_name in array
     
+    parameters
+    ----------
+    col_name: string
+        the first elt of array should have this col_name separated by \t
+    array: numpy array
+        results of reading with np.loadtxt, array.dtype is 'S????' (strings)
+    comma2point: bool
+    exclude: string
+        the string to exclude
+    val_len: int or None
+        if int, indicates max number of values can be read in this columns
+        eg: 1 will constrain to 1 value
+
+    returns
+    -------
+    array of values for this column 
+
     """
     # assume col_split is \t
     col_split = '\t'
@@ -96,7 +119,7 @@ def get_col_vals(col_name, array, comma2point=True, sep=' ', exclude=None, val_l
     else:
         to_keep = np.full_like(str_vals, True, dtype=bool)
     
-    print('to_keep.shape', to_keep.shape, 'number to keep: ', to_keep.sum()) 
+    print('array read shape:', to_keep.shape, 'number to keep: ', to_keep.sum()) 
     
     #  
     vals = [str2floats(val, sep=sep, comma2point=comma2point, val_len=val_len)[0] \
